@@ -32,8 +32,7 @@ class CrystalACL(object):
                                             'ResellerAdmin').lower()
         self.reseller_prefixes, self.account_rules = \
             config_read_reseller_options(conf,
-                                         dict(operator_roles=['admin',
-                                                              'swiftoperator'],
+                                         dict(operator_roles=['admin', 'swiftoperator'],
                                               service_roles=[]))
 
     @wsgify
@@ -50,10 +49,14 @@ class CrystalACL(object):
             self.logger.debug('Using identity: %r', env_identity)
             crystal_acls = self._get_crystal_acls(req)
 
+            if not crystal_acls:
+                return req.get_response(self.app)
+
             return self.authorize(req, env_identity, crystal_acls)
 
     def _get_crystal_acls(self, req):
-        (_, account, container, obj) = req.split_path(3, 4, True)
+        part = req.split_path(1, 4, True)
+        version, account, container, obj = part
 
         return {}
 
@@ -61,10 +64,6 @@ class CrystalACL(object):
 
         req.environ['REMOTE_USER'] = env_identity.get('tenant')
         req.environ['keystone.identity'] = env_identity
-        user_roles = (r.lower() for r in env_identity.get('roles', []))
-        user_service_roles = [r.lower() for r in env_identity.get('service_roles', [])]
-        if self.reseller_admin_role in user_roles:
-            req.environ['reseller_request'] = True
 
         # Cleanup - make sure that a previously set swift_owner setting is
         # cleared now. This might happen for example with COPY requests.
@@ -84,9 +83,14 @@ class CrystalACL(object):
 
         # Give unconditional access to a user with the reseller_admin
         # role.
+        user_roles = [r.lower() for r in env_identity.get('roles', [])]
+        user_service_roles = [r.lower() for r in env_identity.get(
+                              'service_roles', [])]
+
         if self.reseller_admin_role in user_roles:
-            msg = 'User %s has reseller admin authorizing'
-            self.logger.debug(msg, tenant_id)
+            msg = 'User %s:%s has reseller admin authorizing'
+            self.logger.debug(msg, tenant_name, user_name)
+            req.environ['reseller_request'] = True
             req.environ['swift_owner'] = True
             return self.allowed_response(req)
 
@@ -108,11 +112,9 @@ class CrystalACL(object):
         # Check if user is account admin (admin role)
         account_prefix = self._get_account_prefix(account)
         operator_roles = self.account_rules[account_prefix]['operator_roles']
-        have_operator_role = set(operator_roles).intersection(
-            set(user_roles))
+        have_operator_role = set(operator_roles).intersection(set(user_roles))
         service_roles = self.account_rules[account_prefix]['service_roles']
-        have_service_role = set(service_roles).intersection(
-            set(user_service_roles))
+        have_service_role = set(service_roles).intersection(set(user_service_roles))
         allowed = False
         if have_operator_role and (service_roles and have_service_role):
             allowed = True
