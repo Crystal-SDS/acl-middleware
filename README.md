@@ -30,7 +30,7 @@ After that, it is necessary to configure OpenStack Swift to add the middleware t
 
 Edit the `/etc/swift/proxy-server.conf` file in each Proxy Node, and perform the following changes:
 
-1. Add the Crystal ACL Middleware to the pipeline. This filter must be added between the between the `authtoken` and the `keystoneauth` middlewares.
+1. Add the Crystal ACL Middleware to the pipeline. This filter must be added between the `authtoken` and the `keystoneauth` middlewares.
 
 
 ```ini

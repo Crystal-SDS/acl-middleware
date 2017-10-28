@@ -20,6 +20,7 @@ from swift.common.utils import list_from_csv
 from swift.common.swob import HTTPNotFound, HTTPForbidden, HTTPUnauthorized
 from swift.common.swob import wsgify
 from swift.common.utils import config_read_reseller_options
+import redis
 
 
 class CrystalACL(object):
@@ -35,6 +36,10 @@ class CrystalACL(object):
                                          dict(operator_roles=['admin', 'swiftoperator'],
                                               service_roles=[]))
 
+        self.rcp = redis.ConnectionPool(host=conf['redis_host'],
+                                        port=conf['redis_port'],
+                                        db=conf['redis_db'])
+
     @wsgify
     def __call__(self, req):
         """
@@ -46,7 +51,6 @@ class CrystalACL(object):
         env_identity = self._keystone_identity(req.environ)
 
         if env_identity:
-            self.logger.debug('Using identity: %r', env_identity)
             crystal_acls = self._get_crystal_acls(req)
 
             if not crystal_acls:
@@ -57,10 +61,16 @@ class CrystalACL(object):
     def _get_crystal_acls(self, req):
         part = req.split_path(1, 4, True)
         version, account, container, obj = part
+        r = redis.Redis(connection_pool=self.rcp)
+        account_id = account.replace(self._get_account_prefix(account), '')
+        acls = None
+        if container:
+            acls = r.hgetall('access_control:'+account_id+':'+container)
 
-        return {}
+        return acls
 
     def authorize(self, req, env_identity, crystal_acls):
+        self.logger.debug('Using identity: %r', env_identity)
 
         req.environ['REMOTE_USER'] = env_identity.get('tenant')
         req.environ['keystone.identity'] = env_identity
@@ -129,6 +139,7 @@ class CrystalACL(object):
             return self.allowed_response(req)
 
         # Time to check Crystal Rules
+        # TODO: Check crystal ACLs
 
         log_msg = 'User %s:%s allowed in Crystal ACL: authorizing'
         self.logger.debug(log_msg, tenant_name, user_name)
