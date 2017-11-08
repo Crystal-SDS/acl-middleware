@@ -19,8 +19,11 @@ from swift.common.utils import register_swift_info
 from swift.common.utils import list_from_csv
 from swift.common.swob import HTTPNotFound, HTTPForbidden, HTTPUnauthorized
 from swift.common.swob import wsgify
+from swift.common.wsgi import make_subrequest
 from swift.common.utils import config_read_reseller_options
+import mimetypes
 import redis
+import json
 
 
 class CrystalACL(object):
@@ -51,25 +54,27 @@ class CrystalACL(object):
         env_identity = self._keystone_identity(req.environ)
 
         if env_identity:
-            crystal_acls = self._get_crystal_acls(req)
+            acc_acls, con_acls = self._get_crystal_acls(req)
 
-            if not crystal_acls:
+            if not acc_acls and not con_acls:
                 return req.get_response(self.app)
 
-            return self.authorize(req, env_identity, crystal_acls)
+            return self.authorize(req, env_identity, acc_acls, con_acls)
 
     def _get_crystal_acls(self, req):
         part = req.split_path(1, 4, True)
         version, account, container, obj = part
         r = redis.Redis(connection_pool=self.rcp)
         account_id = account.replace(self._get_account_prefix(account), '')
-        acls = None
+        acc_acls = None
+        con_acls = None
         if container:
-            acls = r.hgetall('access_control:'+account_id+':'+container)
+            acc_acls = r.hgetall('acl:'+account_id)
+            con_acls = r.hgetall('acl:'+account_id+':'+container)
 
-        return acls
+        return acc_acls, con_acls
 
-    def authorize(self, req, env_identity, crystal_acls):
+    def authorize(self, req, env_identity, acc_acls, con_acls):
         self.logger.debug('Using identity: %r', env_identity)
 
         req.environ['REMOTE_USER'] = env_identity.get('tenant')
@@ -139,12 +144,83 @@ class CrystalACL(object):
             return self.allowed_response(req)
 
         # Time to check Crystal Rules
-        # TODO: Check crystal ACLs
+        # Check container acls
+        if con_acls:
+            for _, acl in con_acls.items():
+                acl = json.loads(acl)
+                if user_id in acl['user_id']:
+                    allowed = self._check_conditions(req, acl)
 
-        log_msg = 'User %s:%s allowed in Crystal ACL: authorizing'
-        self.logger.debug(log_msg, tenant_name, user_name)
+        # Check account acls in case the user is not allowed by a container acl
+        if not allowed and acc_acls:
+            for _, acl in acc_acls.items():
+                acl = json.loads(acl)
+                if user_id in acl['user_id']:
+                    allowed = self._check_conditions(req, acl)
 
-        return self.allowed_response(req)
+        if allowed:
+            log_msg = 'User %s:%s allowed in Crystal ACL: authorizing'
+            self.logger.debug(log_msg, tenant_name, user_name)
+            return self.allowed_response(req)
+        else:
+            log_msg = 'User %s:%s denied in Crystal ACL: none authorizing'
+            self.logger.debug(log_msg, tenant_name, user_name)
+            return self.denied_response(req)
+
+    def _check_conditions(self, req, acl):
+        allowed = False
+
+        if req.method in ('GET', 'HEAD'):
+            correct_type = True
+            correct_tags = True
+
+            if acl['object_type'] or acl['object_tag']:
+                new_env = dict(req.environ)
+                new_env['swift.authorize_override'] = True
+                sub_req = make_subrequest(new_env, method='HEAD',
+                                          path=req.path_info,
+                                          headers=req.headers,
+                                          swift_source='Crystal Filter Middleware')
+                resp = sub_req.get_response(self.app)
+                metadata = resp.headers
+
+                if acl['object_type']:
+                    obj_type = acl['object_type']
+                    correct_type = self._get_object_type(metadata) in \
+                        self.redis.lrange("object_type:" + obj_type, 0, -1)
+
+                if acl['object_tag']:
+                    tags = acl['object_tag'].split(',')
+                    tag_checking = list()
+                    for tag in tags:
+                        key, value = tag.split(':')
+                        if value.startswith('!'):
+                            negative = True
+                            value = value.strip('!')
+                        else:
+                            negative = False
+                        correct_tag = ('X-Object-Meta-'+key in metadata and
+                                       metadata['X-Object-Meta-'+key] == value) or \
+                                      ('X-Object-Sysmeta-'+key in metadata and
+                                       metadata['X-Object-Sysmeta-'+key] == value)
+                        if negative:
+                            tag_checking.append(not correct_tag)
+                        else:
+                            tag_checking.append(correct_tag)
+                    correct_tags = all(tag_checking)
+
+            allowed = acl['read'] and correct_type and correct_tags
+
+        elif req.method in ('PUT', 'POST', 'DELETE'):
+            allowed = acl['write']
+
+        return allowed
+
+    def _get_object_type(self, metadata):
+        object_type = metadata['Content-Type']
+        if not object_type:
+            object_type = mimetypes.guess_type(self.request.environ['PATH_INFO'])[0]
+        return object_type
 
     def _keystone_identity(self, environ):
         """Extract the identity from the Keystone auth component."""
