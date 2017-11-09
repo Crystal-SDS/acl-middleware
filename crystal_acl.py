@@ -65,11 +65,16 @@ class CrystalACL(object):
         part = req.split_path(1, 4, True)
         version, account, container, obj = part
         r = redis.Redis(connection_pool=self.rcp)
-        account_id = account.replace(self._get_account_prefix(account), '')
+
         acc_acls = None
         con_acls = None
-        if container:
+
+        if account or container:
+            account_id = account.replace(self._get_account_prefix(account), '')
+
+        if account:
             acc_acls = r.hgetall('acl:'+account_id)
+        if container:
             con_acls = r.hgetall('acl:'+account_id+':'+container)
 
         return acc_acls, con_acls
@@ -149,14 +154,24 @@ class CrystalACL(object):
             for _, acl in con_acls.items():
                 acl = json.loads(acl)
                 if user_id in acl['user_id']:
-                    allowed = self._check_conditions(req, acl)
+                    if req.method in ('GET', 'HEAD') and acl['list'] and not acl['read']:
+                        allowed = account and container and not object
+                    else:
+                        allowed = self._check_conditions(req, acl)
+                    if allowed:
+                        break
 
         # Check account acls in case the user is not allowed by a container acl
         if not allowed and acc_acls:
             for _, acl in acc_acls.items():
                 acl = json.loads(acl)
                 if user_id in acl['user_id']:
-                    allowed = self._check_conditions(req, acl)
+                    if req.method in ('GET', 'HEAD') and acl['list'] and not acl['read']:
+                        allowed = account and not container and not obj
+                    else:
+                        allowed = self._check_conditions(req, acl)
+                    if allowed:
+                        break
 
         if allowed:
             log_msg = 'User %s:%s allowed in Crystal ACL: authorizing'
