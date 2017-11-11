@@ -154,8 +154,8 @@ class CrystalACL(object):
             for _, acl in con_acls.items():
                 acl = json.loads(acl)
                 if user_id in acl['user_id']:
-                    if req.method in ('GET', 'HEAD') and acl['list'] and not acl['read']:
-                        allowed = account and container and not object
+                    if req.method in ('GET', 'HEAD') and acl['list']:
+                        allowed = account and container and not obj
                     else:
                         allowed = self._check_conditions(req, acl)
                     if allowed:
@@ -166,7 +166,7 @@ class CrystalACL(object):
             for _, acl in acc_acls.items():
                 acl = json.loads(acl)
                 if user_id in acl['user_id']:
-                    if req.method in ('GET', 'HEAD') and acl['list'] and not acl['read']:
+                    if req.method in ('GET', 'HEAD') and acl['list']:
                         allowed = account and not container and not obj
                     else:
                         allowed = self._check_conditions(req, acl)
