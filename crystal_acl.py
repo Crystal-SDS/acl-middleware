@@ -214,10 +214,12 @@ class CrystalACL(object):
                             value = value.strip('!')
                         else:
                             negative = False
-                        correct_tag = ('X-Object-Meta-'+key in metadata and
-                                       metadata['X-Object-Meta-'+key] == value) or \
-                                      ('X-Object-Sysmeta-'+key in metadata and
-                                       metadata['X-Object-Sysmeta-'+key] == value)
+                        meta_key = 'X-Object-Meta-'+key.title()
+                        sysmeta_key = 'X-Object-Sysmeta-'+key.title()
+                        correct_tag = (meta_key in metadata and
+                                       metadata[meta_key] == value) or \
+                                      (sysmeta_key in metadata and
+                                       metadata[sysmeta_key] == value)
                         if negative:
                             tag_checking.append(not correct_tag)
                         else:
