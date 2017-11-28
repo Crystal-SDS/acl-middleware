@@ -21,7 +21,7 @@ from swift.common.swob import HTTPNotFound, HTTPForbidden, HTTPUnauthorized
 from swift.common.swob import wsgify
 from swift.common.wsgi import make_subrequest
 from swift.common.utils import config_read_reseller_options
-import mimetypes
+import re
 import redis
 import json
 
@@ -200,9 +200,11 @@ class CrystalACL(object):
                 metadata = resp.headers
 
                 if acl['object_type']:
-                    obj_type = acl['object_type']
-                    correct_type = self._get_object_type(metadata) in \
-                        self.redis.lrange("object_type:" + obj_type, 0, -1)
+                    object_name = acl['object_name']
+                    filename = req.environ['PATH_INFO']
+                    pattern = re.compile(object_name)
+                    if not pattern.search(filename):
+                        correct_type = False
 
                 if acl['object_tag']:
                     tags = acl['object_tag'].split(',')
@@ -232,12 +234,6 @@ class CrystalACL(object):
             allowed = acl['write']
 
         return allowed
-
-    def _get_object_type(self, metadata):
-        object_type = metadata['Content-Type']
-        if not object_type:
-            object_type = mimetypes.guess_type(self.request.environ['PATH_INFO'])[0]
-        return object_type
 
     def _keystone_identity(self, environ):
         """Extract the identity from the Keystone auth component."""
