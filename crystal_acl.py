@@ -21,6 +21,9 @@ from swift.common.swob import HTTPNotFound, HTTPForbidden, HTTPUnauthorized
 from swift.common.swob import wsgify
 from swift.common.wsgi import make_subrequest
 from swift.common.utils import config_read_reseller_options
+from keystoneauth1.identity import v3
+from keystoneauth1 import session
+from keystoneclient.v3 import client
 import re
 import redis
 import json
@@ -42,6 +45,22 @@ class CrystalACL(object):
         self.rcp = redis.ConnectionPool(host=conf['redis_host'],
                                         port=conf['redis_port'],
                                         db=conf['redis_db'])
+
+        project_name = conf.get('project_name', 'service')
+        user = conf.get('user', 'swift')
+        password = conf.get('password', 'swift')
+        auth_url = conf.get('auth_url', 'http://localhost:35357')+'/v3'
+        user_domain_name = conf.get('user_domain_name', 'default')
+        project_domain_name = conf.get('project_domain_name', 'default')
+
+        auth = v3.Password(auth_url=auth_url,
+                           username=user,
+                           password=password,
+                           project_name=project_name,
+                           user_domain_name=user_domain_name,
+                           project_domain_name=project_domain_name)
+        sess = session.Session(auth=auth)
+        self.kc = client.Client(session=sess)
 
     @wsgify
     def __call__(self, req):
@@ -153,7 +172,7 @@ class CrystalACL(object):
         if con_acls:
             for _, acl in con_acls.items():
                 acl = json.loads(acl)
-                if user_id in acl['user_id']:
+                if user_id in acl['user_id'] or self._check_in_group(user_id, acl['group_id']):
                     if req.method in ('GET', 'HEAD') and acl['list']:
                         allowed = account and container and not obj
                     else:
@@ -165,7 +184,7 @@ class CrystalACL(object):
         if not allowed and acc_acls:
             for _, acl in acc_acls.items():
                 acl = json.loads(acl)
-                if user_id in acl['user_id']:
+                if user_id in acl['user_id'] or self._check_in_group(user_id, acl['group_id']):
                     if req.method in ('GET', 'HEAD') and acl['list']:
                         allowed = account and not container and not obj
                     else:
@@ -234,6 +253,12 @@ class CrystalACL(object):
             allowed = acl['write']
 
         return allowed
+
+    def _check_in_group(self, user_id, group_id):
+        if not group_id:
+            return False
+
+        return self.kc.users.check_in_group(user_id, group_id)
 
     def _keystone_identity(self, environ):
         """Extract the identity from the Keystone auth component."""

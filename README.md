@@ -45,6 +45,14 @@ pipeline = catch_errors gatekeeper healthcheck proxy-logging cache container_syn
 [filter:crystal_acl]
 use = egg:swift_crystal_acl_middleware#crystal_acl
 
+#Keystone Credentials (same as in authtoken filter)
+auth_url = http://controller:35357
+project_domain_name = default
+user_domain_name = default
+project_name = service
+username = swift
+password = swift
+
 #Reddis Configuration
 redis_host = controller
 redis_port = 6379
