@@ -79,6 +79,8 @@ class CrystalACL(object):
                 return req.get_response(self.app)
 
             return self.authorize(req, env_identity, acc_acls, con_acls)
+        else:
+            return self.denied_response(req)
 
     def _get_crystal_acls(self, req):
         part = req.split_path(1, 4, True)
@@ -261,6 +263,7 @@ class CrystalACL(object):
         return self.kc.users.check_in_group(user_id, group_id)
 
     def _keystone_identity(self, environ):
+        print environ
         """Extract the identity from the Keystone auth component."""
         if (environ.get('HTTP_X_IDENTITY_STATUS') != 'Confirmed' or
            environ.get('HTTP_X_SERVICE_IDENTITY_STATUS') not in (None, 'Confirmed')):
