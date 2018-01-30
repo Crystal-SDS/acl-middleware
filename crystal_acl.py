@@ -263,7 +263,6 @@ class CrystalACL(object):
         return self.kc.users.check_in_group(user_id, group_id)
 
     def _keystone_identity(self, environ):
-        print environ
         """Extract the identity from the Keystone auth component."""
         if (environ.get('HTTP_X_IDENTITY_STATUS') != 'Confirmed' or
            environ.get('HTTP_X_SERVICE_IDENTITY_STATUS') not in (None, 'Confirmed')):
