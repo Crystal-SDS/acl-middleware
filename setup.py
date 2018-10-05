@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-paste_factory = ['crystal_acl = crystal_acl:filter_factory']
+paste_factory = ['crystal_acl = crystal_acl_middleware.crystal_acl:filter_factory']
 
 setup(name='swift_crystal_acl_middleware',
       version='0.1.0',
